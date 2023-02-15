@@ -108,14 +108,18 @@ const int ci_Shoulder_Servo_Extended = 1300;                                  //
 // Variables
 
 boolean bt_Motors_Enabled = true;                                             // Motors enabled flag
+boolean bt_4_S_Time_Up = false;
 boolean bt_3_S_Time_Up = false;                                               // 3 second timer elapsed flag
 boolean bt_2_S_Time_Up = false;                                               // 2 second timer elapsed flag
+boolean bt_50cm_S_Time_Up = false;                                            // 50cm timer using encoder counter -- 15000 per one rotation
+boolean bt_25cm_S_Time_Up = false;                                            // 25cm timer using encoder counter -- 15000 per one rotation
 boolean bt_200_mS_Time_Up = false;                                            // 200 millisecond timer elapsed flag
 boolean bt_Direction;                                                         // Stepper motor direction
 boolean bt_Stepper_Step;                                                      // Stepper motor step flag
 
 unsigned char uc_Drive_Speed;                                                 // Motor drive speed (0-255)
 unsigned char uc_Drive_Index;                                                 // State index for run mode (1)
+unsigned char uc_Case5_Drive_Index;                                                
 unsigned char uc_Stepper_Index;                                               // State index for stepper test mode (2)
 
 int i_MaxStepsFromCentre = 900;                                               // Allowable number of steps from centre point
@@ -132,6 +136,9 @@ unsigned int ui_PotClawSetpoint;                                              //
 unsigned int ui_PotShoulderSetpoint;                                          // Desired position of shoulder servo read from pot
 unsigned int ui_Mode_PB_Debounce;                                             // Pushbutton debounce timer count
 
+unsigned long ul_50cm_timer = 0;
+unsigned long ul_25cm_timer = 0;
+unsigned long ul_4_Second_timer = 0;
 unsigned long ul_3_Second_timer = 0;                                          // 3 second timer count in milliseconds
 unsigned long ul_2_Second_timer = 0;                                          // 2 second timer count in milliseconds
 unsigned long ul_200_mS_timer = 0;                                            // 200 millisecond timer count in milliseconds
@@ -216,7 +223,6 @@ void loop()
    if ((ul_Current_Micros - ul_Previous_Micros) >= 1000)                      // Enter when 1 ms has elapsed
    {
       ul_Previous_Micros = ul_Current_Micros;                                 // Record current time in microseconds
-
       // 3 second timer, counts 3000 milliseconds
       ul_3_Second_timer = ul_3_Second_timer + 1;                              // Increment 3 second timer count
       if(ul_3_Second_timer > 3000)                                            // If 3 seconds have elapsed
@@ -232,7 +238,7 @@ void loop()
          ul_2_Second_timer = 0;                                               // Reset 2 second timer count
          bt_2_S_Time_Up = true;                                               // Indicate that 2 seconds have elapsed
       }
-   
+
       // 200 millisecond timer, counts 200 milliseconds
       ul_200_mS_timer = ul_200_mS_timer + 1;                                  // Increment 200 millisecond timer count
       if(ul_200_mS_timer > 200)                                               // If 200 milliseconds have elapsed
@@ -298,6 +304,9 @@ void loop()
             uc_Stepper_Index = 0;                                             // Reset stepper index
             driveEncoders.clearEncoder();                                     // Clear encoder counts
             bt_2_S_Time_Up = false;                                           // Reset 2 second timer flag
+            ul_50cm_timer = 0;
+            ul_25cm_timer = 0;
+            ul_4_Second_timer = 0;
             break;
          }  
       
@@ -534,11 +543,91 @@ void loop()
             break;
          }
            
-         case 5: //add your code to do something 
+         case 5: // Lab 3 - Driving instructions
          {
-            ui_Robot_Mode_Index = 0; //  !!!!!!!  remove if using the case
+            uc_Drive_Speed = map(analogRead(BRDTST_POT_R1), 0, 4096, 150, 255);
+#ifdef DEBUG_DRIVE_SPEED 
+               Serial.print(F("Drive Speed: Pot R1 = "));
+               Serial.print(analogRead(BRDTST_POT_R1));
+               Serial.print(F(", mapped = "));
+               Serial.println(uc_Drive_Speed);
+#endif
+#ifdef DEBUG_ENCODER_COUNT
+               driveEncoders.getEncoderRawCount();
+               driveEncoders.getEncoderRawSpeed();
+               Serial.print(F("Left Encoder count = "));
+               Serial.print(driveEncoders.lRawEncoderLeftCount);
+               Serial.print(F("   Right Encoder count = "));
+               Serial.print(driveEncoders.lRawEncoderRightCount);
+               Serial.print(F("   Left Encoder speed = "));
+               Serial.print(driveEncoders.lRawEncoderLeftSpeed);
+               Serial.print(F("   Right Encoder speed = "));
+               Serial.println(driveEncoders.lRawEncoderRightSpeed);
+#endif
+
+              if(bt_Motors_Enabled)                                          // Run motors only if enabled
+               {         
+                     switch(uc_Case5_Drive_Index)                                   // Cycle through drive states
+                     {
+                        case 0: // Drive forward 50cm 
+                        {
+                           Bot.Forward("D1", uc_Drive_Speed, uc_Drive_Speed); // Drive ID, Left speed, Right speed
+                           ul_50cm_timer = ul_50cm_timer + 1;     
+                            if (ul_50cm_timer > 3757) {
+                              ul_50cm_timer = 0;
+                              uc_Case5_Drive_Index = 1;                                // Next state: drive backward                               // Drive ID
+                              } 
+                           break;
+                        }
+                        case 1: // Drive backward
+                        {
+                           Bot.Reverse("D1", uc_Drive_Speed);                 // Drive ID, Speed (same for both)                 
+                            ul_25cm_timer = ul_25cm_timer + 1;                                       // Increment 1.879 second timer count
+                           if (ul_25cm_timer > 1879) {
+                            ul_25cm_timer = 0;
+                            uc_Case5_Drive_Index = 2;                                // Next state: pause                                   // Drive ID
+                           }
+                           break;
+                        }
+                        case 2: // Stop
+                        {
+                           Bot.Stop("D1");                                    // Drive ID
+                           ul_4_Second_timer = ul_4_Second_timer + 1;                              // Increment 4 second timer count
+                           if (ul_4_Second_timer > 4000) {
+                            ul_4_Second_timer = 0;
+                            uc_Case5_Drive_Index = 3;                                // Next state: Drive Backward                                   // Drive ID
+                           }
+                           break;
+                        }
+                        case 3: // Reverse 25 cm
+                        {
+                           Bot.Reverse("D1", uc_Drive_Speed);                 // Drive ID, Speed (same for both)                 
+                            ul_25cm_timer = ul_25cm_timer + 1;                                       // Increment 1.879 second timer count
+                           if (ul_25cm_timer > 1879) {
+                            ul_25cm_timer = 0;
+                            uc_Case5_Drive_Index = 4;                                // Next state: pause                                   // Drive ID
+                           }
+                           break;
+                        }
+                        case 4: // stop
+                        {
+                           Bot.Stop("D1");  
+                            ul_4_Second_timer = ul_4_Second_timer + 1;                              // Increment 4 second timer count
+                           if (ul_4_Second_timer > 4000) {
+                            ul_4_Second_timer = 0;
+                            uc_Case5_Drive_Index = 0;                                // Next state: Drive Backward                                   // Drive ID
+                            ui_Robot_Mode_Index = 0;
+                           }
+                           break;
+                         }
+                       }
+                }
+               else                                                           // Stop when motors are disabled
+               {  
+                  Bot.Stop("D1");
+               }
             break;
-         }
+         } 
            
          case 6: //add your code to do something 
          {
